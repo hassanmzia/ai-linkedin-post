@@ -154,12 +154,12 @@ export default function ProjectDetailPage() {
                     <span className="font-medium capitalize text-sm">{step.agent}</span>
                     <span className="text-xs text-gray-500">Step {step.step}</span>
                   </div>
-                  {step.data.duration_ms && (
-                    <span className="text-xs text-gray-400">{step.data.duration_ms}ms</span>
+                  {step.data.duration_ms != null && (
+                    <span className="text-xs text-gray-400">{String(step.data.duration_ms)}ms</span>
                   )}
                 </div>
                 <p className="text-sm text-gray-600 mt-1">
-                  {step.data.decision || step.data.task || step.data.findings_preview || step.data.draft_preview || step.data.feedback_preview || ''}
+                  {String(step.data.decision || step.data.task || step.data.findings_preview || step.data.draft_preview || step.data.feedback_preview || '')}
                 </p>
               </div>
             ))}
