@@ -1,0 +1,146 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: linkedin-postgres
+    environment:
+      POSTGRES_DB: linkedin_agent
+      POSTGRES_USER: linkedin_user
+      POSTGRES_PASSWORD: linkedin_secure_pass_2024
+    ports:
+      - "5452:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkedin_user -d linkedin_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - linkedin-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: linkedin-redis
+    ports:
+      - "6452:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - linkedin-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: linkedin-backend
+    environment:
+      - DATABASE_URL=postgresql://linkedin_user:linkedin_secure_pass_2024@postgres:5432/linkedin_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SETTINGS_MODULE=linkedin_agent.settings
+      - ALLOWED_HOSTS=*
+      - CORS_ALLOWED_ORIGINS=http://172.168.1.95:3052,http://localhost:3052
+      - GATEWAY_URL=http://gateway:4052
+      - SECRET_KEY=django-insecure-change-in-production-xk3j9f8s7d6a5
+    ports:
+      - "8052:8052"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - backend_static:/app/staticfiles
+    networks:
+      - linkedin-net
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: linkedin-celery-worker
+    command: celery -A linkedin_agent worker -l info --concurrency=4
+    environment:
+      - DATABASE_URL=postgresql://linkedin_user:linkedin_secure_pass_2024@postgres:5432/linkedin_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SETTINGS_MODULE=linkedin_agent.settings
+      - SECRET_KEY=django-insecure-change-in-production-xk3j9f8s7d6a5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - linkedin-net
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: linkedin-celery-beat
+    command: celery -A linkedin_agent beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment:
+      - DATABASE_URL=postgresql://linkedin_user:linkedin_secure_pass_2024@postgres:5432/linkedin_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SETTINGS_MODULE=linkedin_agent.settings
+      - SECRET_KEY=django-insecure-change-in-production-xk3j9f8s7d6a5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - linkedin-net
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: linkedin-gateway
+    environment:
+      - PORT=4052
+      - BACKEND_URL=http://backend:8052
+      - REDIS_URL=redis://redis:6379/0
+      - CORS_ORIGIN=http://172.168.1.95:3052
+    ports:
+      - "4052:4052"
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - linkedin-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://172.168.1.95:4052
+        - VITE_WS_URL=ws://172.168.1.95:4052
+    container_name: linkedin-frontend
+    ports:
+      - "3052:80"
+    depends_on:
+      - gateway
+    networks:
+      - linkedin-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_static:
+
+networks:
+  linkedin-net:
+    driver: bridge
